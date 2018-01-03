@@ -1,16 +1,21 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace dnuml
 {
     public class YumlMe
     {
-        private const string _url = "https://yuml.me/diagram/scruffy/class/";
+        private const string _url = "https://yuml.me/diagram/plain/class/";
+        private const string _baseUrl = "https://yuml.me/";
         private const char _classPrefix = '[';
         private const char _classSuffix = ']';
         private const char _delimiter = ';';
         private const char _sectionDivider = '|';
-        private const char _usesArrow = '^';
+        private const string _arrow = "->";
 
         public List<YumlClass> Classes { get; } = new List<YumlClass>();
         public string QueryString { get; private set; }
@@ -20,7 +25,7 @@ namespace dnuml
             Classes.Add(@class);
         }
 
-        public byte[] Build()
+        public async Task<byte[]> Build()
         {
             for (var c = 0; c < Classes.Count; c++)
             {
@@ -62,8 +67,30 @@ namespace dnuml
                 if(c != Classes.Count -1)
                     QueryString += ',';
             }
-            QueryString = _url + QueryString;
-            return new WebClient().DownloadData(QueryString);
+            foreach (var c in Classes)
+            {
+                foreach (var r in c.References)
+                {
+                    QueryString += ",[" + c.Name + "]" + _arrow + "[" + r.Name + "]";
+                }
+            }
+            var commandContentBytes = System.Text.Encoding.UTF8.GetBytes(QueryString);
+            var invalidPathChars = System.IO.Path.GetInvalidPathChars().Select(x=>Convert.ToByte(x));
+
+            var found = commandContentBytes.Intersect(invalidPathChars).ToArray();
+            // Console.WriteLine(System.Text.Encoding.UTF8.GetString(found));
+            HttpClient client = new HttpClient();
+            var values = new Dictionary<string, string>
+            {
+                {"dsl_text", QueryString},
+            };
+            var items = values.Select(i => WebUtility.UrlEncode(i.Key) + "=" + WebUtility.UrlEncode(i.Value));
+            var content = new StringContent(String.Join("&", items), null, "application/x-www-form-urlencoded");
+            var response = await client.PostAsync(_url, content);
+            var id = await response.Content.ReadAsStringAsync();
+            client = new HttpClient();
+            response = await client.GetAsync(_baseUrl + id);
+            return await response.Content.ReadAsByteArrayAsync();
         }
     }
 
